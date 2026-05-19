@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Property Cash Flow Search</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p id="locationLabel" class="eyebrow">ZIP Code Search</p>
+        <h1>Property Cash Flow</h1>
+      </div>
+      <div class="topbar-actions">
+        <button id="reloadButton" class="icon-button" type="button" title="Reload data" aria-label="Reload data">
+          ↻
+        </button>
+        <a id="csvLink" class="primary-link" href="zillow_cash_flow.csv" download>CSV</a>
+      </div>
+    </header>
+
+    <main>
+      <section class="zip-search" aria-label="ZIP code search">
+        <label>
+          <span>ZIP Code</span>
+          <input id="zipcodeInput" type="text" inputmode="numeric" maxlength="5" placeholder="83642" value="83642">
+        </label>
+        <label>
+          <span>Pages</span>
+          <input id="pagesInput" type="number" min="1" max="5" step="1" value="1">
+        </label>
+        <button id="searchButton" class="search-button" type="button">Search</button>
+        <p id="searchStatus" class="search-status">Enter a ZIP code to find properties for sale.</p>
+      </section>
+
+      <section class="stats" aria-label="Portfolio summary">
+        <div class="stat">
+          <span>Listings</span>
+          <strong id="statCount">0</strong>
+        </div>
+        <div class="stat">
+          <span>Median Price</span>
+          <strong id="statMedianPrice">$0</strong>
+        </div>
+        <div class="stat">
+          <span>Best Cash Flow</span>
+          <strong id="statBestCashFlow">$0/mo</strong>
+        </div>
+        <div class="stat">
+          <span>Average CoC</span>
+          <strong id="statCashReturn">0%</strong>
+        </div>
+      </section>
+
+      <section class="controls" aria-label="Listing controls">
+        <label class="search-field">
+          <span>Search</span>
+          <input id="searchInput" type="search" placeholder="Address, ZIP, type">
+        </label>
+        <label>
+          <span>Property Type</span>
+          <select id="typeFilter">
+            <option value="">All</option>
+          </select>
+        </label>
+        <label>
+          <span>Cash Flow</span>
+          <select id="cashFlowFilter">
+            <option value="">All</option>
+            <option value="positive">Positive</option>
+            <option value="negative">Negative</option>
+          </select>
+        </label>
+        <label>
+          <span>Max Price</span>
+          <input id="maxPriceInput" type="number" min="0" step="25000" placeholder="No max">
+        </label>
+      </section>
+
+      <section class="workspace">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><button type="button" data-sort="address">Address</button></th>
+                <th><button type="button" data-sort="price">Price</button></th>
+                <th><button type="button" data-sort="property_subtype">Type</button></th>
+                <th><button type="button" data-sort="beds">Beds</button></th>
+                <th><button type="button" data-sort="sqft">Sq Ft</button></th>
+                <th><button type="button" data-sort="monthly_cash_flow">Cash Flow</button></th>
+                <th><button type="button" data-sort="cash_on_cash_return">CoC</button></th>
+              </tr>
+            </thead>
+            <tbody id="listingRows"></tbody>
+          </table>
+          <div id="emptyState" class="empty-state" hidden>No listings match the current filters.</div>
+        </div>
+
+        <aside id="detailPanel" class="detail-panel" aria-label="Selected property"></aside>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
