@@ -2,6 +2,7 @@ import argparse
 import csv
 import json
 import mimetypes
+import os
 import re
 from dataclasses import asdict, dataclass
 from html import unescape
@@ -632,6 +633,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-csv", default="zillow_cash_flow.csv")
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--serve", action="store_true")
+    parser.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=8001)
 
     parser.add_argument("--down-payment-percent", type=float, default=20)
@@ -654,7 +656,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     if args.serve:
-        address = ("127.0.0.1", args.port)
+        port = int(os.getenv("PORT", args.port))
+        address = (args.host, port)
         print(f"Serving dashboard at http://{address[0]}:{address[1]}/")
         ThreadingHTTPServer(address, ZillowDashboardHandler).serve_forever()
         return

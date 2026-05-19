@@ -31,6 +31,24 @@ Then open:
 http://localhost:8001/index.html
 ```
 
+## Deploy On Render
+
+1. Go to [Render](https://render.com).
+2. Sign in with GitHub.
+3. Choose **New** > **Web Service**.
+4. Select this repository.
+5. Use these settings:
+
+```text
+Runtime: Python
+Build command: pip install -r requirements.txt
+Start command: python main.py --serve --host 0.0.0.0
+```
+
+Render will set the `PORT` environment variable automatically. The app reads that value when it starts.
+
+This repository also includes `render.yaml`, so Render can detect the same settings from the repo.
+
 ## Command-Line Scrape
 
 ```bash
