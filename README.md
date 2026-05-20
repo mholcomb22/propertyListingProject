@@ -8,6 +8,10 @@ A local Python web app that searches Zillow listings by ZIP code, estimates rent
 - Zillow listing extraction with `curl_cffi`
 - Cash-flow estimates using rent, mortgage, taxes, insurance, vacancy, maintenance, management, and capex assumptions
 - Property type filter, including duplex and triplex display when Zillow exposes enough detail
+- User-adjustable rent, mortgage rate, and expense assumptions
+- SQLite search caching by ZIP code
+- Saved searches by local user name
+- Map links for listings with coordinates
 - Sortable browser table
 - Property detail panel
 - CSV export
@@ -63,3 +67,5 @@ The app writes the latest output to:
 ## Notes
 
 Zillow may block scraping from some networks or cloud hosting providers. If that happens, the UI will still load, but searches may fail or return no results.
+
+This app includes a `REAL_ESTATE_DATA_PROVIDER` setting as a future extension point. The current implementation supports Zillow scraping only. For production use, replace the scraper with a licensed real-estate data API adapter and add real authentication instead of the local saved-search username field.

@@ -34,6 +34,57 @@
         <p id="searchStatus" class="search-status">Enter a ZIP code to find properties for sale.</p>
       </section>
 
+      <section class="assumptions" aria-label="Cash flow assumptions">
+        <label>
+          <span>Rent / Unit</span>
+          <input id="rentPerUnitInput" type="number" min="0" step="50" value="2200">
+        </label>
+        <label>
+          <span>Interest <output id="interestRateValue">7.25%</output></span>
+          <input id="interestRateInput" type="range" min="0" max="12" step="0.05" value="7.25">
+        </label>
+        <label>
+          <span>Tax <output id="taxRateValue">1.2%</output></span>
+          <input id="taxRateInput" type="range" min="0" max="4" step="0.05" value="1.2">
+        </label>
+        <label>
+          <span>Insurance <output id="insuranceRateValue">0.35%</output></span>
+          <input id="insuranceRateInput" type="range" min="0" max="2" step="0.05" value="0.35">
+        </label>
+        <label>
+          <span>Vacancy <output id="vacancyValue">5%</output></span>
+          <input id="vacancyInput" type="range" min="0" max="20" step="0.5" value="5">
+        </label>
+        <label>
+          <span>Maintenance <output id="maintenanceValue">5%</output></span>
+          <input id="maintenanceInput" type="range" min="0" max="20" step="0.5" value="5">
+        </label>
+        <label>
+          <span>Management <output id="managementValue">8%</output></span>
+          <input id="managementInput" type="range" min="0" max="20" step="0.5" value="8">
+        </label>
+        <label>
+          <span>CapEx <output id="capexValue">5%</output></span>
+          <input id="capexInput" type="range" min="0" max="20" step="0.5" value="5">
+        </label>
+      </section>
+
+      <section class="saved-bar" aria-label="Saved searches">
+        <label>
+          <span>User</span>
+          <input id="userInput" type="text" value="guest">
+        </label>
+        <button id="saveSearchButton" class="secondary-button" type="button">Save Search</button>
+        <select id="savedSearchSelect" aria-label="Saved searches">
+          <option value="">Saved searches</option>
+        </select>
+      </section>
+
+      <div id="progressPanel" class="progress-panel" hidden>
+        <div class="progress-track"><span id="progressBar"></span></div>
+        <span id="progressText">Preparing search...</span>
+      </div>
+
       <section class="stats" aria-label="Portfolio summary">
         <div class="stat">
           <span>Listings</span>
@@ -98,6 +149,14 @@
         </div>
 
         <aside id="detailPanel" class="detail-panel" aria-label="Selected property"></aside>
+      </section>
+
+      <section class="map-section" aria-label="Listing map">
+        <div class="map-head">
+          <h2>Map View</h2>
+          <p>Listings with coordinates appear as map links below.</p>
+        </div>
+        <div id="mapGrid" class="map-grid"></div>
       </section>
     </main>
 

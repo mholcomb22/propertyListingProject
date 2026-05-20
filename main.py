@@ -4,6 +4,8 @@ import json
 import mimetypes
 import os
 import re
+import sqlite3
+import time
 from dataclasses import asdict, dataclass
 from html import unescape
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -23,6 +25,9 @@ DEFAULT_ZIPCODE = "83642"
 MIN_PRICE = 100_000
 MAX_PRICE = 100_000_000
 BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "property_cache.sqlite3"
+CACHE_TTL_SECONDS = 60 * 60
+DATA_PROVIDER = os.getenv("REAL_ESTATE_DATA_PROVIDER", "zillow")
 REQUEST_HEADERS = {
     "Accept": (
         "text/html,application/xhtml+xml,application/xml;q=0.9,"
@@ -56,6 +61,8 @@ class Listing:
     city: str | None
     state: str | None
     zipcode: str | None
+    latitude: float | None
+    longitude: float | None
     zpid: str | None
     monthly_rent: float
     down_payment: float
@@ -240,6 +247,159 @@ def analyze_cash_flow(
     }
 
 
+def build_assumptions(query: dict[str, list[str]] | None = None) -> argparse.Namespace:
+    query = query or {}
+
+    def number(name: str, default: float) -> float:
+        value = query.get(name, [None])[0]
+        if value in (None, ""):
+            return default
+        try:
+            return float(value)
+        except ValueError:
+            return default
+
+    monthly_rent_value = query.get("monthly_rent", [None])[0]
+    monthly_rent = None
+    if monthly_rent_value not in (None, ""):
+        try:
+            monthly_rent = float(monthly_rent_value)
+        except ValueError:
+            monthly_rent = None
+
+    return argparse.Namespace(
+        down_payment_percent=number("down_payment_percent", 20),
+        interest_rate=number("interest_rate", 7.25),
+        loan_years=int(number("loan_years", 30)),
+        default_units=int(number("default_units", 1)),
+        rent_per_unit=number("rent_per_unit", 2200),
+        monthly_rent=monthly_rent,
+        tax_rate_percent=number("tax_rate_percent", 1.2),
+        insurance_rate_percent=number("insurance_rate_percent", 0.35),
+        vacancy_percent=number("vacancy_percent", 5),
+        maintenance_percent=number("maintenance_percent", 5),
+        management_percent=number("management_percent", 8),
+        capex_percent=number("capex_percent", 5),
+    )
+
+
+def apply_assumptions(row: dict[str, Any], assumptions: argparse.Namespace) -> Listing:
+    base = dict(row)
+    price = base.get("price")
+    units = base.get("units")
+    if price is None:
+        raise ValueError("Listing is missing price and cannot be analyzed.")
+
+    cash_flow = analyze_cash_flow(int(price), units, assumptions)
+    for key in cash_flow:
+        base.pop(key, None)
+    base.update(cash_flow)
+    return Listing(**base)
+
+
+def init_database() -> None:
+    with sqlite3.connect(DB_PATH) as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS search_cache (
+                zipcode TEXT NOT NULL,
+                pages INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                listings_json TEXT NOT NULL,
+                PRIMARY KEY (zipcode, pages)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS saved_searches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_name TEXT NOT NULL,
+                zipcode TEXT NOT NULL,
+                pages INTEGER NOT NULL,
+                assumptions_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+            """
+        )
+
+
+def read_cached_rows(zipcode: str, pages: int) -> list[dict[str, Any]] | None:
+    init_database()
+    with sqlite3.connect(DB_PATH) as connection:
+        row = connection.execute(
+            """
+            SELECT created_at, listings_json
+            FROM search_cache
+            WHERE zipcode = ? AND pages = ?
+            """,
+            (zipcode, pages),
+        ).fetchone()
+
+    if not row:
+        return None
+
+    created_at, listings_json = row
+    if int(time.time()) - int(created_at) > CACHE_TTL_SECONDS:
+        return None
+
+    return json.loads(listings_json)
+
+
+def write_cached_rows(zipcode: str, pages: int, rows: list[dict[str, Any]]) -> None:
+    init_database()
+    with sqlite3.connect(DB_PATH) as connection:
+        connection.execute(
+            """
+            INSERT INTO search_cache (zipcode, pages, created_at, listings_json)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(zipcode, pages)
+            DO UPDATE SET created_at = excluded.created_at,
+                          listings_json = excluded.listings_json
+            """,
+            (zipcode, pages, int(time.time()), json.dumps(rows)),
+        )
+
+
+def save_search(user_name: str, zipcode: str, pages: int, assumptions: dict[str, Any]) -> int:
+    init_database()
+    with sqlite3.connect(DB_PATH) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO saved_searches (user_name, zipcode, pages, assumptions_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (user_name, zipcode, pages, json.dumps(assumptions), int(time.time())),
+        )
+        return int(cursor.lastrowid)
+
+
+def list_saved_searches(user_name: str) -> list[dict[str, Any]]:
+    init_database()
+    with sqlite3.connect(DB_PATH) as connection:
+        rows = connection.execute(
+            """
+            SELECT id, zipcode, pages, assumptions_json, created_at
+            FROM saved_searches
+            WHERE user_name = ?
+            ORDER BY created_at DESC
+            LIMIT 25
+            """,
+            (user_name,),
+        ).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "zipcode": row[1],
+            "pages": row[2],
+            "assumptions": json.loads(row[3]),
+            "created_at": row[4],
+        }
+        for row in rows
+    ]
+
+
 def build_page_url(search_url: str, page_number: int) -> str:
     clean_url = search_url.rstrip("/")
     if page_number == 1:
@@ -333,6 +493,8 @@ def normalize_json_listing(raw: dict[str, Any]) -> dict[str, Any] | None:
         "city": home_info.get("city"),
         "state": home_info.get("state"),
         "zipcode": home_info.get("zipcode") or extract_zipcode(raw.get("address")),
+        "latitude": home_info.get("latitude") or raw.get("latLong", {}).get("latitude"),
+        "longitude": home_info.get("longitude") or raw.get("latLong", {}).get("longitude"),
         "zpid": str(raw.get("zpid")) if raw.get("zpid") else None,
     }
 
@@ -398,6 +560,8 @@ def extract_listings_from_cards(soup: BeautifulSoup) -> list[dict[str, Any]]:
                 "city": None,
                 "state": None,
                 "zipcode": extract_zipcode(address, text),
+                "latitude": None,
+                "longitude": None,
                 "zpid": None,
             }
         )
@@ -534,7 +698,26 @@ def write_outputs(listings: list[Listing], output_json: str, output_csv: str) ->
         writer.writerows(rows)
 
 
-def scrape_zipcode(zipcode: str, pages: int = 1) -> list[Listing]:
+def scrape_zipcode(
+    zipcode: str,
+    pages: int = 1,
+    assumptions: argparse.Namespace | None = None,
+    use_cache: bool = True,
+) -> tuple[list[Listing], bool]:
+    if DATA_PROVIDER != "zillow":
+        raise ValueError(
+            "Licensed data API mode is not configured. Set REAL_ESTATE_DATA_PROVIDER=zillow "
+            "or add provider credentials and adapter code."
+        )
+
+    assumptions = assumptions or build_assumptions()
+    cached_rows = read_cached_rows(zipcode, pages) if use_cache else None
+    if cached_rows is not None:
+        listings = [apply_assumptions(row, assumptions) for row in cached_rows]
+        listings.sort(key=lambda item: item.monthly_cash_flow, reverse=True)
+        write_outputs(listings, "zillow_cash_flow.json", "zillow_cash_flow.csv")
+        return listings, True
+
     args = argparse.Namespace(
         search_url=build_zip_search_url(zipcode),
         city="",
@@ -547,22 +730,23 @@ def scrape_zipcode(zipcode: str, pages: int = 1) -> list[Listing]:
         output_json="zillow_cash_flow.json",
         output_csv="zillow_cash_flow.csv",
         timeout=45,
-        down_payment_percent=20,
-        interest_rate=7.25,
-        loan_years=30,
-        default_units=1,
-        rent_per_unit=2200,
-        monthly_rent=None,
-        tax_rate_percent=1.2,
-        insurance_rate_percent=0.35,
-        vacancy_percent=5,
-        maintenance_percent=5,
-        management_percent=8,
-        capex_percent=5,
+        down_payment_percent=assumptions.down_payment_percent,
+        interest_rate=assumptions.interest_rate,
+        loan_years=assumptions.loan_years,
+        default_units=assumptions.default_units,
+        rent_per_unit=assumptions.rent_per_unit,
+        monthly_rent=assumptions.monthly_rent,
+        tax_rate_percent=assumptions.tax_rate_percent,
+        insurance_rate_percent=assumptions.insurance_rate_percent,
+        vacancy_percent=assumptions.vacancy_percent,
+        maintenance_percent=assumptions.maintenance_percent,
+        management_percent=assumptions.management_percent,
+        capex_percent=assumptions.capex_percent,
     )
     listings = scrape_zillow(args)
     write_outputs(listings, args.output_json, args.output_csv)
-    return listings
+    write_cached_rows(zipcode, pages, [asdict(listing) for listing in listings])
+    return listings, False
 
 
 class ZillowDashboardHandler(SimpleHTTPRequestHandler):
@@ -586,6 +770,8 @@ class ZillowDashboardHandler(SimpleHTTPRequestHandler):
             query = parse_qs(parsed.query)
             zipcode = query.get("zipcode", [""])[0].strip()
             pages_text = query.get("pages", ["1"])[0].strip()
+            refresh = query.get("refresh", ["false"])[0].lower() == "true"
+            assumptions = build_assumptions(query)
 
             if not re.fullmatch(r"\d{5}", zipcode):
                 self.send_json({"error": "Enter a valid 5-digit ZIP code."}, status=400)
@@ -597,7 +783,9 @@ class ZillowDashboardHandler(SimpleHTTPRequestHandler):
                 pages = 1
 
             try:
-                listings = scrape_zipcode(zipcode, pages=pages)
+                listings, cache_hit = scrape_zipcode(
+                    zipcode, pages=pages, assumptions=assumptions, use_cache=not refresh
+                )
             except Exception as error:
                 self.send_json({"error": str(error)}, status=500)
                 return
@@ -606,9 +794,49 @@ class ZillowDashboardHandler(SimpleHTTPRequestHandler):
                 {
                     "zipcode": zipcode,
                     "count": len(listings),
+                    "cache_hit": cache_hit,
+                    "data_provider": DATA_PROVIDER,
                     "listings": [asdict(listing) for listing in listings],
                 }
             )
+            return
+
+        if parsed.path == "/api/save-search":
+            query = parse_qs(parsed.query)
+            user_name = query.get("user", ["guest"])[0].strip() or "guest"
+            zipcode = query.get("zipcode", [""])[0].strip()
+            pages_text = query.get("pages", ["1"])[0].strip()
+            if not re.fullmatch(r"\d{5}", zipcode):
+                self.send_json({"error": "Enter a valid 5-digit ZIP code."}, status=400)
+                return
+
+            try:
+                pages = max(1, min(int(pages_text), 5))
+            except ValueError:
+                pages = 1
+
+            assumptions = {
+                key: query.get(key, [""])[0]
+                for key in [
+                    "rent_per_unit",
+                    "interest_rate",
+                    "tax_rate_percent",
+                    "insurance_rate_percent",
+                    "vacancy_percent",
+                    "maintenance_percent",
+                    "management_percent",
+                    "capex_percent",
+                    "down_payment_percent",
+                ]
+            }
+            saved_id = save_search(user_name, zipcode, pages, assumptions)
+            self.send_json({"id": saved_id, "saved": True})
+            return
+
+        if parsed.path == "/api/saved-searches":
+            query = parse_qs(parsed.query)
+            user_name = query.get("user", ["guest"])[0].strip() or "guest"
+            self.send_json({"user": user_name, "saved_searches": list_saved_searches(user_name)})
             return
 
         if parsed.path == "/":

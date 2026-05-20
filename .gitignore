@@ -8,3 +8,6 @@ __pycache__/
 
 # Optional local environment files
 .env
+
+# Local app database
+*.sqlite3

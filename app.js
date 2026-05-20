@@ -21,6 +21,34 @@ const searchButton = document.querySelector("#searchButton");
 const searchStatus = document.querySelector("#searchStatus");
 const locationLabel = document.querySelector("#locationLabel");
 const csvLink = document.querySelector("#csvLink");
+const progressPanel = document.querySelector("#progressPanel");
+const progressBar = document.querySelector("#progressBar");
+const progressText = document.querySelector("#progressText");
+const mapGrid = document.querySelector("#mapGrid");
+const userInput = document.querySelector("#userInput");
+const saveSearchButton = document.querySelector("#saveSearchButton");
+const savedSearchSelect = document.querySelector("#savedSearchSelect");
+
+const assumptionControls = {
+  rent_per_unit: document.querySelector("#rentPerUnitInput"),
+  interest_rate: document.querySelector("#interestRateInput"),
+  tax_rate_percent: document.querySelector("#taxRateInput"),
+  insurance_rate_percent: document.querySelector("#insuranceRateInput"),
+  vacancy_percent: document.querySelector("#vacancyInput"),
+  maintenance_percent: document.querySelector("#maintenanceInput"),
+  management_percent: document.querySelector("#managementInput"),
+  capex_percent: document.querySelector("#capexInput"),
+};
+
+const assumptionOutputs = {
+  interest_rate: document.querySelector("#interestRateValue"),
+  tax_rate_percent: document.querySelector("#taxRateValue"),
+  insurance_rate_percent: document.querySelector("#insuranceRateValue"),
+  vacancy_percent: document.querySelector("#vacancyValue"),
+  maintenance_percent: document.querySelector("#maintenanceValue"),
+  management_percent: document.querySelector("#managementValue"),
+  capex_percent: document.querySelector("#capexValue"),
+};
 
 const currency = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -34,23 +62,17 @@ const percent = new Intl.NumberFormat("en-US", {
 });
 
 function formatMoney(value, suffix = "") {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "N/A";
-  }
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "N/A";
   return `${currency.format(Number(value))}${suffix}`;
 }
 
 function formatNumber(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "N/A";
-  }
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "N/A";
   return Number(value).toLocaleString("en-US", { maximumFractionDigits: 1 });
 }
 
 function formatPercent(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return "N/A";
-  }
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "N/A";
   return percent.format(Number(value) / 100);
 }
 
@@ -71,10 +93,30 @@ function listingId(listing) {
   return listing.zpid || listing.url || listing.address;
 }
 
-function sortValue(listing, key) {
-  if (key === "property_subtype") {
-    return displayType(listing).toLowerCase();
+function getAssumptions() {
+  return Object.fromEntries(
+    Object.entries(assumptionControls).map(([key, control]) => [key, control.value])
+  );
+}
+
+function assumptionParams() {
+  return new URLSearchParams(getAssumptions());
+}
+
+function updateAssumptionOutputs() {
+  for (const [key, output] of Object.entries(assumptionOutputs)) {
+    output.textContent = `${assumptionControls[key].value}%`;
   }
+}
+
+function setProgress(visible, text = "", percentValue = 0) {
+  progressPanel.hidden = !visible;
+  progressText.textContent = text;
+  progressBar.style.width = `${percentValue}%`;
+}
+
+function sortValue(listing, key) {
+  if (key === "property_subtype") return displayType(listing).toLowerCase();
   const value = listing[key];
   if (value === null || value === undefined) return "";
   return typeof value === "string" ? value.toLowerCase() : value;
@@ -186,13 +228,6 @@ function renderRows() {
       state.selectedId = id;
       render();
     });
-    row.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        state.selectedId = id;
-        render();
-      }
-    });
 
     const cashFlowClass = Number(listing.monthly_cash_flow) >= 0 ? "positive" : "negative";
     row.innerHTML = `
@@ -212,30 +247,27 @@ function renderRows() {
 }
 
 function metric(label, value, className = "") {
-  return `
-    <div class="metric">
-      <span>${label}</span>
-      <strong class="${className}">${value}</strong>
-    </div>
-  `;
+  return `<div class="metric"><span>${label}</span><strong class="${className}">${value}</strong></div>`;
 }
 
 function renderDetail() {
   const listing = state.filtered.find((item) => listingId(item) === state.selectedId);
   if (!listing) {
-    detailPanelEl.innerHTML = `
-      <div class="detail-head">
-        <h2>No property selected</h2>
-      </div>
-    `;
+    detailPanelEl.innerHTML = '<div class="detail-head"><h2>No property selected</h2></div>';
     return;
   }
 
   const cashFlowClass = Number(listing.monthly_cash_flow) >= 0 ? "positive" : "negative";
+  const mapUrl = listing.latitude && listing.longitude
+    ? `https://www.openstreetmap.org/?mlat=${listing.latitude}&mlon=${listing.longitude}#map=16/${listing.latitude}/${listing.longitude}`
+    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(listing.address || "")}`;
+
   detailPanelEl.innerHTML = `
     <div class="detail-head">
       <h2>${listing.address || "N/A"}</h2>
       <a class="detail-link" href="${listing.url}" target="_blank" rel="noreferrer">Open on Zillow</a>
+      <br>
+      <a class="detail-link" href="${mapUrl}" target="_blank" rel="noreferrer">Open map</a>
     </div>
     <div class="detail-grid">
       ${metric("Price", formatMoney(listing.price))}
@@ -250,24 +282,40 @@ function renderDetail() {
       ${metric("Sq Ft", formatNumber(listing.sqft))}
       ${metric("Type", normalizeType(displayType(listing)))}
       ${metric("Units", formatNumber(listing.units))}
-      ${metric("ZPID", listing.zpid || "N/A")}
     </div>
   `;
+}
+
+function renderMap() {
+  mapGrid.innerHTML = "";
+  const items = state.filtered.slice(0, 24);
+  for (const listing of items) {
+    const card = document.createElement("div");
+    card.className = "map-card";
+    const mapUrl = listing.latitude && listing.longitude
+      ? `https://www.openstreetmap.org/?mlat=${listing.latitude}&mlon=${listing.longitude}#map=16/${listing.latitude}/${listing.longitude}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(listing.address || "")}`;
+    card.innerHTML = `
+      <strong>${listing.address || "N/A"}</strong>
+      <span class="subtext">${formatMoney(listing.price)} · ${normalizeType(displayType(listing))}</span>
+      <a href="${mapUrl}" target="_blank" rel="noreferrer">Open map</a>
+    `;
+    mapGrid.append(card);
+  }
 }
 
 function render() {
   renderStats();
   renderRows();
   renderDetail();
+  renderMap();
 }
 
 async function loadListings() {
   reloadButton.disabled = true;
   try {
     const response = await fetch(`zillow_cash_flow.json?ts=${Date.now()}`);
-    if (!response.ok) {
-      throw new Error(`Could not load data: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`Could not load data: ${response.status}`);
     state.listings = await response.json();
     if (state.listings[0]?.zipcode) {
       state.zipcode = state.listings[0].zipcode;
@@ -281,17 +329,12 @@ async function loadListings() {
     rowsEl.innerHTML = "";
     emptyStateEl.hidden = false;
     emptyStateEl.textContent = error.message;
-    detailPanelEl.innerHTML = `
-      <div class="detail-head">
-        <h2>Data unavailable</h2>
-      </div>
-    `;
   } finally {
     reloadButton.disabled = false;
   }
 }
 
-async function searchZipcode() {
+async function searchZipcode({ refresh = false } = {}) {
   const zipcode = zipcodeInput.value.trim();
   const pages = pagesInput.value || "1";
   if (!/^\d{5}$/.test(zipcode)) {
@@ -302,27 +345,32 @@ async function searchZipcode() {
 
   searchButton.disabled = true;
   reloadButton.disabled = true;
-  searchStatus.textContent = `Searching ZIP ${zipcode} for properties...`;
+  setProgress(true, refresh ? "Refreshing Zillow data..." : "Checking cache and assumptions...", 20);
   rowsEl.innerHTML = "";
   emptyStateEl.hidden = false;
-  emptyStateEl.textContent = "Searching Zillow...";
+  emptyStateEl.textContent = "Loading results...";
 
   try {
-    const response = await fetch(`/api/search?zipcode=${encodeURIComponent(zipcode)}&pages=${encodeURIComponent(pages)}`);
+    const params = assumptionParams();
+    params.set("zipcode", zipcode);
+    params.set("pages", pages);
+    params.set("refresh", String(refresh));
+    setProgress(true, "Searching and calculating cash flow...", 65);
+    const response = await fetch(`/api/search?${params.toString()}`);
     const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || `Search failed: ${response.status}`);
-    }
+    if (!response.ok) throw new Error(payload.error || `Search failed: ${response.status}`);
 
     state.zipcode = payload.zipcode;
     state.listings = payload.listings || [];
     state.selectedId = state.listings[0] ? listingId(state.listings[0]) : null;
     locationLabel.textContent = `ZIP ${state.zipcode}`;
     csvLink.href = `zillow_cash_flow.csv?ts=${Date.now()}`;
-    searchStatus.textContent = `Found ${payload.count} properties in ZIP ${state.zipcode}.`;
+    searchStatus.textContent = `Found ${payload.count} properties in ZIP ${state.zipcode}${payload.cache_hit ? " from cache" : ""}.`;
     updateTypeFilter();
     resetLocalFilters();
+    setProgress(true, "Rendering dashboard...", 95);
     applyFilters();
+    setTimeout(() => setProgress(false), 500);
   } catch (error) {
     state.listings = [];
     state.filtered = [];
@@ -330,9 +378,36 @@ async function searchZipcode() {
     emptyStateEl.hidden = false;
     emptyStateEl.textContent = error.message;
     searchStatus.textContent = error.message;
+    setProgress(false);
   } finally {
     searchButton.disabled = false;
     reloadButton.disabled = false;
+  }
+}
+
+async function saveCurrentSearch() {
+  const zipcode = zipcodeInput.value.trim();
+  if (!/^\d{5}$/.test(zipcode)) return;
+  const params = assumptionParams();
+  params.set("zipcode", zipcode);
+  params.set("pages", pagesInput.value || "1");
+  params.set("user", userInput.value.trim() || "guest");
+  const response = await fetch(`/api/save-search?${params.toString()}`);
+  const payload = await response.json();
+  searchStatus.textContent = response.ok ? `Saved search #${payload.id}.` : payload.error;
+  await loadSavedSearches();
+}
+
+async function loadSavedSearches() {
+  const user = userInput.value.trim() || "guest";
+  const response = await fetch(`/api/saved-searches?user=${encodeURIComponent(user)}`);
+  const payload = await response.json();
+  savedSearchSelect.innerHTML = '<option value="">Saved searches</option>';
+  for (const saved of payload.saved_searches || []) {
+    const option = document.createElement("option");
+    option.value = JSON.stringify(saved);
+    option.textContent = `${saved.zipcode} · ${new Date(saved.created_at * 1000).toLocaleString()}`;
+    savedSearchSelect.append(option);
   }
 }
 
@@ -353,12 +428,29 @@ document.querySelectorAll("[data-sort]").forEach((button) => {
   control.addEventListener("input", applyFilters);
 });
 
-reloadButton.addEventListener("click", searchZipcode);
-searchButton.addEventListener("click", searchZipcode);
-zipcodeInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    searchZipcode();
-  }
+Object.values(assumptionControls).forEach((control) => {
+  control.addEventListener("input", updateAssumptionOutputs);
 });
 
+reloadButton.addEventListener("click", () => searchZipcode({ refresh: true }));
+searchButton.addEventListener("click", () => searchZipcode());
+saveSearchButton.addEventListener("click", saveCurrentSearch);
+userInput.addEventListener("change", loadSavedSearches);
+savedSearchSelect.addEventListener("change", () => {
+  if (!savedSearchSelect.value) return;
+  const saved = JSON.parse(savedSearchSelect.value);
+  zipcodeInput.value = saved.zipcode;
+  pagesInput.value = saved.pages;
+  for (const [key, value] of Object.entries(saved.assumptions || {})) {
+    if (assumptionControls[key] && value !== "") assumptionControls[key].value = value;
+  }
+  updateAssumptionOutputs();
+  searchZipcode();
+});
+zipcodeInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") searchZipcode();
+});
+
+updateAssumptionOutputs();
 loadListings();
+loadSavedSearches();
