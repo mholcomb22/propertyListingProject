@@ -65,6 +65,9 @@ class Listing:
     longitude: float | None
     zpid: str | None
     monthly_rent: float
+    total_actual_rent: float
+    price_per_sqft: float | None
+    annual_property_tax: float
     down_payment: float
     loan_amount: float
     monthly_mortgage_pi: float
@@ -190,17 +193,21 @@ def analyze_cash_flow(
     price: int,
     units: int | None,
     args: argparse.Namespace,
+    sqft: int | None = None,
 ) -> dict[str, float | None]:
     analysis_units = units or args.default_units
     monthly_rent = args.monthly_rent
     if monthly_rent is None:
         monthly_rent = analysis_units * args.rent_per_unit
 
+    total_actual_rent = monthly_rent
+    price_per_sqft = price / sqft if sqft else None
+    annual_property_tax = price * (args.tax_rate_percent / 100)
     down_payment = price * (args.down_payment_percent / 100)
     loan_amount = price - down_payment
     mortgage_pi = monthly_payment(loan_amount, args.interest_rate, args.loan_years)
 
-    monthly_taxes = price * (args.tax_rate_percent / 100) / 12
+    monthly_taxes = annual_property_tax / 12
     monthly_insurance = price * (args.insurance_rate_percent / 100) / 12
     monthly_vacancy = monthly_rent * (args.vacancy_percent / 100)
     monthly_maintenance = monthly_rent * (args.maintenance_percent / 100)
@@ -231,6 +238,9 @@ def analyze_cash_flow(
 
     return {
         "monthly_rent": monthly_rent,
+        "total_actual_rent": total_actual_rent,
+        "price_per_sqft": price_per_sqft,
+        "annual_property_tax": annual_property_tax,
         "down_payment": down_payment,
         "loan_amount": loan_amount,
         "monthly_mortgage_pi": mortgage_pi,
@@ -290,7 +300,7 @@ def apply_assumptions(row: dict[str, Any], assumptions: argparse.Namespace) -> L
     if price is None:
         raise ValueError("Listing is missing price and cannot be analyzed.")
 
-    cash_flow = analyze_cash_flow(int(price), units, assumptions)
+    cash_flow = analyze_cash_flow(int(price), units, assumptions, base.get("sqft"))
     for key in cash_flow:
         base.pop(key, None)
     base.update(cash_flow)
@@ -678,7 +688,7 @@ def scrape_zillow(args: argparse.Namespace) -> list[Listing]:
                 listing["units"] = args.default_units
 
             seen_urls.add(listing["url"])
-            cash_flow = analyze_cash_flow(price, listing.get("units"), args)
+            cash_flow = analyze_cash_flow(price, listing.get("units"), args, listing.get("sqft"))
             analyzed.append(Listing(**listing, **cash_flow))
 
     analyzed.sort(key=lambda item: item.monthly_cash_flow, reverse=True)

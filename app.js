@@ -239,6 +239,9 @@ function renderRows() {
       <td><span class="pill">${normalizeType(displayType(listing))}</span></td>
       <td class="number">${formatNumber(listing.beds)}</td>
       <td class="number">${formatNumber(listing.sqft)}</td>
+      <td class="money">${formatMoney(listing.price_per_sqft)}</td>
+      <td class="money">${formatMoney(listing.total_actual_rent, "/mo")}</td>
+      <td class="money">${formatMoney(listing.annual_property_tax, "/yr")}</td>
       <td class="${cashFlowClass} money">${formatMoney(listing.monthly_cash_flow, "/mo")}</td>
       <td class="number">${formatPercent(listing.cash_on_cash_return)}</td>
     `;
@@ -272,7 +275,9 @@ function renderDetail() {
     <div class="detail-grid">
       ${metric("Price", formatMoney(listing.price))}
       ${metric("Cash Flow", formatMoney(listing.monthly_cash_flow, "/mo"), cashFlowClass)}
-      ${metric("Monthly Rent", formatMoney(listing.monthly_rent, "/mo"))}
+      ${metric("Total Actual Rent", formatMoney(listing.total_actual_rent ?? listing.monthly_rent, "/mo"))}
+      ${metric("Price / Sq Ft", formatMoney(listing.price_per_sqft))}
+      ${metric("Property Tax", formatMoney(listing.annual_property_tax, "/yr"))}
       ${metric("Monthly Expenses", formatMoney(listing.monthly_expenses, "/mo"))}
       ${metric("Mortgage P&I", formatMoney(listing.monthly_mortgage_pi, "/mo"))}
       ${metric("NOI", formatMoney(listing.monthly_noi, "/mo"))}
@@ -321,6 +326,9 @@ async function loadListings() {
       state.zipcode = state.listings[0].zipcode;
       zipcodeInput.value = state.zipcode;
       locationLabel.textContent = `ZIP ${state.zipcode}`;
+    }
+    if (state.listings.length > 41) {
+      pagesInput.value = "5";
     }
     state.selectedId = state.listings[0] ? listingId(state.listings[0]) : null;
     updateTypeFilter();
